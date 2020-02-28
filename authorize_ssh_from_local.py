@@ -20,10 +20,30 @@ def get_local_ip_address() -> str:
     return requests.get("https://api.ipify.org").text
 
 
+def flash_security_group(sg: str):
+    logger.info(f"flash_security_group: sgroup:{sg}")
+    client = boto3.client('ec2')
+    security_group = client.describe_security_groups(
+        GroupIds=(sg,),
+    )
+    logger.info(f"describe_security_groups: {security_group}")
+    try:
+        ciderip = security_group['SecurityGroups'][0]['IpPermissions'][0]['IpRanges'][0]['CidrIp']
+    except IndexError as identifier:
+        logger.warn(f"No ingress rules to revoke")
+        return
+    ret = client.revoke_security_group_ingress(
+        CidrIp=ciderip,
+        FromPort=22,
+        GroupId=sg,
+        IpProtocol='tcp',
+        ToPort=22,
+    )
+    logger.info(f"revoke_security_group_ingress: {ret}")
+
+
 def update_security_group(sg: str):
-
     logger.info(f"update_security_group: sgroup:{sg}")
-
     client = boto3.client('ec2')
     ret = client.authorize_security_group_ingress(
         GroupId=sg,
@@ -37,8 +57,7 @@ def update_security_group(sg: str):
             'ToPort': 22,
         }]
     )
-
-    logger.info(f"authorize_security_group_ingress: return: {ret}")
+    logger.info(f"authorize_security_group_ingress: {ret}")
 
 
 if __name__ == '__main__':
@@ -47,13 +66,15 @@ if __name__ == '__main__':
         description="Open ssh ingress from the local machine via the supplied security group id.",
     )
     parser.add_argument(
-        'sg',
+        '--sg',
+        default=settings.DEFAULT_SG,
         help="Security Group in the form 'sg-' followed by a long hexidecimal number, e.g., sg-0123456789abcdef",
         type=str,
     )
 
     args = parser.parse_args()
 
+    flash_security_group(args.sg)
     update_security_group(args.sg)
 
     exit(0)
